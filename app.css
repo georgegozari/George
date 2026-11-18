@@ -260,3 +260,25 @@ body.hide-tabs main{padding-bottom:calc(var(--safe-b) + 100px)}
 .ed-hint{font-size:12px;text-align:center}
 .inj-ed .chip{min-height:34px;padding:5px 12px}
 .face .hit{stroke:none}
+.face .hitl{stroke:transparent;stroke-width:18}
+.face .tmp{stroke-width:3.2;stroke-linecap:round;stroke-dasharray:6 4}
+.face.on-photo .dose{fill:#1a1013;stroke:#fff}
+.face.on-photo{background:#000}
+.ed-views{margin:0 12px 8px}
+.ed-views button{font-size:13.5px}
+.ed-mode{flex:1;margin:0}
+.ed-row .ed-unit{width:110px;flex:none}
+.ed-panel .seg button{padding:5px 4px}
+.ed-lbl{width:32px}
+.views{display:flex;flex-direction:column;align-items:center}
+.views.multi{flex-direction:row;align-items:flex-start;gap:10px;overflow-x:auto;scroll-snap-type:x mandatory;margin:0 -14px;padding:0 14px 4px;scrollbar-width:none}
+.views.multi::-webkit-scrollbar{display:none}
+.views figure{margin:0;width:100%;max-width:340px;flex:none;scroll-snap-align:center}
+.views.multi figure{width:78%;max-width:300px}
+.views figure .face{border-radius:12px;overflow:hidden}
+.views figcaption{text-align:center;font-size:12.5px;color:var(--muted);margin-top:4px}
+.prodsum{display:flex;flex-direction:column;gap:2px;align-items:center;font-size:14px;margin-top:6px}
+.prodsum b{margin-right:6px}
+.legend .ring{background:#fff;border:2px solid var(--muted)}
+.face text{stroke:none}
+.face .dose{pointer-events:none}

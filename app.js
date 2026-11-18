@@ -43,25 +43,60 @@ const PHOTO_LABELS = ['術前', '術中', '術後', '其他'];
 const INJECTABLE = ['肉毒', '玻尿酸', '膠原增生', '水光/皮膚', '埋線'];
 
 // ---------- injection map (注射點位圖) ----------
-// 座標使用 viewBox 0 0 300 400；x < 150 為病人右側（畫面左側）
+// 每個標記：{ id, type:'pt'|'line', view:'front'|'profR'|'profL'|'p:<photoId>', x, y, (x2, y2), dose, unit, depth, tool, product, note }
+// 座標系寬度固定 300；正面圖 x < 150 為病人右側（畫面左側）
 const DEPTHS = [['皮內', '#0284c7'], ['皮下', '#16a34a'], ['肌肉', '#db2777'], ['骨膜上', '#7c3aed']];
 const TOOLS = ['針', '鈍針'];
 const UNITS = ['U', 'cc'];
 const DOSE_PRESETS = { U: [1, 2, 2.5, 4, 5, 10], cc: [0.05, 0.1, 0.2, 0.3, 0.5, 1] };
+const VIEWS = [['front', '正面'], ['profR', '右側面'], ['profL', '左側面']];
 const depthColor = d => (DEPTHS.find(x => x[0] === d) || [])[1] || '#e0a800';
 const fmtN = n => String(+(+n).toFixed(3));
-const injSide = p => p.x < 145 ? '右' : p.x > 155 ? '左' : '中';
+const itemView = it => it.view || 'front';
+const isPhotoView = v => String(v).startsWith('p:');
 const ptLabel = p => p.dose ? fmtN(p.dose) + (p.unit || '') : '';
-function injTotals(pts, filter = () => true) {
+const splitProducts = s => String(s || '').split(/[、,，;；\/+＋\n]/).map(x => x.trim()).filter(Boolean);
+function injSide(it) {
+  const v = itemView(it), x = it.type === 'line' ? (it.x + it.x2) / 2 : it.x;
+  if (v === 'profR') return x >= 222 ? '中' : '右';
+  if (v === 'profL') return x <= 78 ? '中' : '左';
+  return x < 145 ? '右' : x > 155 ? '左' : '中';
+}
+function injTotals(items, filter = () => true) {
   const t = {};
-  for (const p of pts) if (filter(p) && +p.dose) t[p.unit] = (t[p.unit] || 0) + +p.dose;
+  for (const p of items) if (filter(p) && +p.dose) t[p.unit] = (t[p.unit] || 0) + +p.dose;
   return Object.entries(t).map(([u, v]) => fmtN(v) + ' ' + u).join(' + ');
 }
-function injSummary(pts) {
-  if (!pts?.length) return '';
-  const all = injTotals(pts), r = injTotals(pts, p => injSide(p) === '右'), l = injTotals(pts, p => injSide(p) === '左'), m = injTotals(pts, p => injSide(p) === '中');
-  return `${pts.length} 點${all ? '，總量 ' + all : ''}${r || l ? `（右 ${r || 0}／左 ${l || 0}${m ? '／中線 ' + m : ''}）` : ''}`;
+function injSummary(items) {
+  if (!items?.length) return '';
+  const np = items.filter(i => i.type !== 'line').length, nl = items.length - np;
+  const all = injTotals(items), r = injTotals(items, p => injSide(p) === '右'), l = injTotals(items, p => injSide(p) === '左'), m = injTotals(items, p => injSide(p) === '中');
+  return `${[np && np + ' 點', nl && nl + ' 條線'].filter(Boolean).join('、')}${all ? '，總量 ' + all : ''}${r || l ? `（右 ${r || 0}／左 ${l || 0}${m ? '／中線 ' + m : ''}）` : ''}`;
 }
+function productTotals(items) {
+  if (!items.some(i => i.product)) return [];
+  const m = new Map();
+  for (const it of items) { const k = it.product || '未指定產品'; if (!m.has(k)) m.set(k, []); m.get(k).push(it); }
+  return [...m].map(([k, arr]) => [k, injTotals(arr)]).filter(([, t]) => t);
+}
+const productText = items => productTotals(items).map(([k, t]) => `${k} ${t}`).join('；');
+const liveItems = (items, photos) => (items || []).filter(i => !isPhotoView(itemView(i)) || (photos || []).some(p => 'p:' + p.id === itemView(i)));
+function usedViews(items, photos) {
+  const vs = new Set(items.map(itemView));
+  return [...VIEWS.map(v => v[0]), ...(photos || []).map(p => 'p:' + p.id)].filter(v => vs.has(v));
+}
+function viewName(view, photos) {
+  const v = VIEWS.find(x => x[0] === view);
+  if (v) return v[1];
+  const ph = (photos || []).find(p => 'p:' + p.id === view);
+  return ph ? `照片・${ph.label}${ph.date ? ' ' + fmtDate(ph.date).slice(5) : ''}` : '照片';
+}
+const viewH = (view, photos) => {
+  if (!isPhotoView(view)) return 400;
+  const ph = (photos || []).find(p => 'p:' + p.id === view);
+  return Math.round(300 * (ph?.ar || 4 / 3));
+};
+
 const FACE = `<g class="face-lines" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
   <path class="soft" stroke-dasharray="2 4" d="M150 44V338"/>
   <path d="M150 40C95 40 70 80 68 140C66 180 70 215 78 245C88 285 110 320 130 335C140 342 160 342 170 335C190 320 212 285 222 245C230 215 234 180 232 140C230 80 205 40 150 40Z"/>
@@ -78,28 +113,73 @@ const FACE = `<g class="face-lines" fill="none" stroke="currentColor" stroke-lin
   <path class="soft" d="M124 274C121 286 123 296 128 303M176 274C179 286 177 296 172 303"/>
   <path class="soft" d="M138 312C145 318 155 318 162 312"/>
   <path d="M113 329L108 396M187 329L192 396"/>
-</g>
-<text x="16" y="24" class="side-lbl">R</text><text x="284" y="24" class="side-lbl" text-anchor="end">L</text>`;
-function faceSVG(pts = [], cls = '') {
-  return `<svg class="face ${cls}" viewBox="0 0 300 400" role="img" aria-label="臉部注射點位圖">${FACE}<g class="pts">${pts.map(p =>
-    `<g class="pt" data-id="${p.id}" transform="translate(${p.x} ${p.y})"><circle class="hit" r="12" fill="transparent"/>
-      <circle r="5.5" fill="${depthColor(p.depth)}" stroke="#fff" stroke-width="1.6"/>
-      ${p.dose ? `<text x="8" y="3.5" class="dose">${esc(ptLabel(p))}</text>` : ''}</g>`).join('')}</g></svg>`;
+</g>`;
+// 右側面：病人臉朝畫面右方
+const PROFILE = `<g class="face-lines" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+  <path d="M150 40C200 40 225 70 228 115C230 135 226 145 224 150C222 156 222 160 226 168L252 220C255 228 250 232 240 232C236 233 234 236 236 240C240 247 242 252 240 258C236 262 236 263 238 266C240 272 238 278 232 282C226 288 226 292 230 300C236 310 236 322 228 330C220 338 205 342 185 342C170 342 160 350 155 365L150 396"/>
+  <path d="M150 40C95 40 60 80 58 140C56 190 70 230 95 255C110 270 115 300 112 330L108 396"/>
+  <path class="soft" stroke-dasharray="4 4" d="M92 92C125 66 190 64 220 96"/>
+  <path d="M128 158C112 150 108 175 112 195C116 212 128 220 135 210C140 200 138 170 128 158Z"/>
+  <path class="soft" d="M127 170C120 172 120 190 126 198"/>
+  <path class="soft" d="M128 222C124 250 118 280 122 296C140 320 175 336 210 338"/>
+  <path d="M190 145C200 140 212 140 222 146"/>
+  <path d="M200 165C206 159 212 159 217 166C212 170 206 170 200 165Z"/>
+  <path class="soft" d="M203 175C208 180 214 180 219 176"/>
+  <path d="M233 221C229 213 238 211 245 219"/>
+  <path class="soft" d="M228 228C219 240 217 255 222 268"/>
+  <path class="soft" d="M165 188C182 200 200 204 213 198"/>
+  <path class="soft" d="M224 264L236 265"/>
+</g>`;
+function viewBg(view, h, src) {
+  if (view === 'front') return FACE + `<text x="16" y="24" class="side-lbl">R</text><text x="284" y="24" class="side-lbl" text-anchor="end">L</text>`;
+  if (view === 'profR') return PROFILE + `<text x="16" y="24" class="side-lbl">右側面</text>`;
+  if (view === 'profL') return `<g transform="translate(300 0) scale(-1 1)">${PROFILE}</g><text x="284" y="24" class="side-lbl" text-anchor="end">左側面</text>`;
+  return `<image ${src ? `href="${src}"` : `data-pid="${view.slice(2)}" data-kind="full"`} x="0" y="0" width="300" height="${h}" preserveAspectRatio="xMidYMid slice"/>`;
 }
-function injLegend(pts) {
-  const used = DEPTHS.filter(([d]) => pts.some(p => p.depth === d));
-  if (pts.some(p => !p.depth)) used.push(['未標層次', depthColor('')]);
-  return used.length > 1 || (used.length && used[0][0] !== '未標層次')
-    ? `<div class="legend">${used.map(([d, c]) => `<span><i style="background:${c}"></i>${d}</span>`).join('')}</div>` : '';
+function itemSVG(it) {
+  const c = depthColor(it.depth);
+  const lab = (x, y) => it.dose ? `<text class="dose" x="${x}" y="${y}">${esc(ptLabel(it))}</text>` : '';
+  if (it.type === 'line') {
+    const mx = (it.x + it.x2) / 2, my = (it.y + it.y2) / 2;
+    return `<g class="it" data-id="${it.id}"><line class="hitl" x1="${it.x}" y1="${it.y}" x2="${it.x2}" y2="${it.y2}"/>
+      <line x1="${it.x}" y1="${it.y}" x2="${it.x2}" y2="${it.y2}" stroke="${c}" stroke-width="3.2" stroke-linecap="round"/>
+      <circle cx="${it.x}" cy="${it.y}" r="4.2" fill="#fff" stroke="${c}" stroke-width="2.4"/>${lab(mx + 6, my - 5)}</g>`;
+  }
+  return `<g class="it" data-id="${it.id}" transform="translate(${it.x} ${it.y})"><circle class="hit" r="12" fill="transparent"/>
+    <circle r="5.5" fill="${c}" stroke="#fff" stroke-width="1.6"/>${lab(8, 3.5)}</g>`;
+}
+function viewSVG(view, items, photos, { src = '', cls = '' } = {}) {
+  const h = viewH(view, photos);
+  return `<svg class="face ${cls} ${isPhotoView(view) ? 'on-photo' : ''}" viewBox="0 0 300 ${h}" role="img" aria-label="注射點位圖：${esc(viewName(view, photos))}">
+    ${viewBg(view, h, src)}<g class="pts">${items.filter(i => itemView(i) === view).map(itemSVG).join('')}</g></svg>`;
+}
+function injLegend(items) {
+  const used = DEPTHS.filter(([d]) => items.some(p => p.depth === d));
+  if (!used.length) return '';
+  if (items.some(p => !p.depth)) used.push(['未標層次', depthColor('')]);
+  return `<div class="legend">${used.map(([d, c]) => `<span><i style="background:${c}"></i>${d}</span>`).join('')}
+    ${items.some(i => i.type === 'line') ? '<span><i class="ring"></i>線：白點＝進針點</span>' : ''}</div>`;
 }
 function loadInjPrefs() {
-  try { return Object.assign({ unit: 'U', dose: 2, depth: '', tool: '' }, JSON.parse(localStorage.getItem('injPrefs') || '{}')); }
-  catch { return { unit: 'U', dose: 2, depth: '', tool: '' }; }
+  const def = { unit: 'U', dose: 2, depth: '', tool: '', mode: 'pt' };
+  try { return Object.assign(def, JSON.parse(localStorage.getItem('injPrefs') || '{}')); } catch { return def; }
 }
-// 全螢幕點位編輯器：點臉部新增點、拖曳移動、點一下已有的點可修改
-function openInjEditor(initial, onDone) {
-  let pts = structuredClone(initial || []);
+function productChoices(first) {
+  return [...new Set([...first, ...S.cases.flatMap(c => [...splitProducts(c.product), ...(c.inj || []).map(i => i.product)])].filter(Boolean))].slice(0, 12);
+}
+function imgSize(src) {
+  return new Promise(res => { const im = new Image(); im.onload = () => res(im.naturalHeight / im.naturalWidth); im.onerror = () => res(4 / 3); im.src = src; });
+}
+
+// 全螢幕點位編輯器
+// ctx = { photos: 病例照片 meta 陣列（會補上 ar 長寬比）, src: async id => 照片網址, products: 產品選項 }
+function openInjEditor(initial, ctx, onDone) {
+  let items = structuredClone(initial || []);
+  const photos = ctx.photos || [];
   const pref = loadInjPrefs();
+  let product = ctx.products[0] || '';
+  const products = [...ctx.products];
+  let view = usedViews(items, photos)[0] || 'front';
   const ed = document.createElement('div');
   ed.className = 'inj-ed';
   document.body.appendChild(ed);
@@ -107,64 +187,122 @@ function openInjEditor(initial, onDone) {
   const close = () => { ed.remove(); if (!$('.overlay')) document.body.style.overflow = ''; };
   const savePref = () => { try { localStorage.setItem('injPrefs', JSON.stringify(pref)); } catch {} };
   ed.innerHTML = `<div class="ed-top"><button class="btn sm" data-e="cancel">取消</button><b>注射點位</b><button class="btn sm primary" data-e="done">完成</button></div>
+    <div class="seg ed-views" id="edViews"></div>
     <div class="ed-canvas" id="edCanvas"></div>
     <div class="ed-panel">
       <div class="ed-sum" id="edSum"></div>
-      <div class="ed-row"><div class="seg ed-unit">${UNITS.map(u => `<button data-unit="${u}">${u}</button>`).join('')}</div>
-        <div class="hscroll ed-doses" id="edDoses"></div></div>
+      <div class="ed-row"><div class="seg ed-mode"><button data-mode="pt">● 點</button><button data-mode="line">╱ 線</button></div>
+        <div class="seg ed-unit">${UNITS.map(u => `<button data-unit="${u}">${u}</button>`).join('')}</div></div>
+      <div class="ed-row"><span class="ed-lbl">劑量</span><div class="hscroll" id="edDoses"></div></div>
+      <div class="ed-row"><span class="ed-lbl">產品</span><div class="hscroll" id="edProd"></div></div>
       <div class="ed-row"><span class="ed-lbl">層次</span><div class="hscroll" id="edDepth">${DEPTHS.map(([d, c]) => `<button class="chip" data-depth="${d}"><i class="dot" style="background:${c}"></i>${d}</button>`).join('')}</div></div>
       <div class="ed-row"><span class="ed-lbl">工具</span><div class="chips" id="edTool">${TOOLS.map(t => `<button class="chip" data-tool="${t}">${t}</button>`).join('')}</div>
         <span style="flex:1"></span><button class="btn sm" data-e="undo">復原</button><button class="btn sm" data-e="clear">清除</button></div>
-      <div class="note ed-hint">先選好劑量，再點臉部新增。按住點可拖曳；點一下可修改或刪除。</div>
+      <div class="note ed-hint" id="edHint"></div>
     </div>`;
+  const canvas = $('#edCanvas', ed);
   const drawPanel = () => {
     $$('[data-unit]', ed).forEach(b => b.classList.toggle('on', b.dataset.unit === pref.unit));
-    $('#edDoses', ed).innerHTML = DOSE_PRESETS[pref.unit].map(v => `<button class="chip" data-dose="${v}" aria-pressed="${+pref.dose === v}">${v}</button>`).join('')
-      + `<button class="chip add" data-dose="custom" aria-pressed="${!DOSE_PRESETS[pref.unit].includes(+pref.dose)}">${DOSE_PRESETS[pref.unit].includes(+pref.dose) ? '其他' : fmtN(pref.dose)}</button>`;
+    $$('[data-mode]', ed).forEach(b => b.classList.toggle('on', b.dataset.mode === pref.mode));
+    const pre = DOSE_PRESETS[pref.unit], isPre = pre.includes(+pref.dose);
+    $('#edDoses', ed).innerHTML = pre.map(v => `<button class="chip" data-dose="${v}" aria-pressed="${+pref.dose === v}">${v}</button>`).join('')
+      + `<button class="chip add" data-dose="custom" aria-pressed="${!isPre}">${isPre ? '其他' : fmtN(pref.dose)}</button>`;
+    $('#edProd', ed).innerHTML = products.map(p => `<button class="chip" data-prod="${esc(p)}" aria-pressed="${p === product}">${esc(p)}</button>`).join('')
+      + `<button class="chip add" data-prod-add="1">＋ 產品</button>`;
     $$('[data-depth]', ed).forEach(b => b.setAttribute('aria-pressed', b.dataset.depth === pref.depth));
     $$('[data-tool]', ed).forEach(b => b.setAttribute('aria-pressed', b.dataset.tool === pref.tool));
+    $('#edHint', ed).textContent = pref.mode === 'line'
+      ? '線模式：從進針點拖曳到終點；從已有的白色進針點拖曳可畫扇形。點一下可修改，切回「點」模式可移動。'
+      : '先選劑量與產品，再點圖新增。按住可拖曳；點一下可修改或刪除。';
   };
-  const drawFace = () => {
-    $('#edCanvas', ed).innerHTML = faceSVG(pts, 'editing');
-    $('#edSum', ed).textContent = pts.length ? injSummary(pts) : '尚未加入點位';
+  const drawViews = () => {
+    const n = v => items.filter(i => itemView(i) === v).length;
+    const nPhoto = items.filter(i => isPhotoView(itemView(i))).length;
+    $('#edViews', ed).innerHTML = VIEWS.map(([v, l]) => `<button data-view="${v}" class="${view === v ? 'on' : ''}">${l.replace('面', '')}${n(v) ? `<span class="n">${n(v)}</span>` : ''}</button>`).join('')
+      + `<button data-view="photo" class="${isPhotoView(view) ? 'on' : ''}">照片${nPhoto ? `<span class="n">${nPhoto}</span>` : ''}</button>`;
   };
+  async function drawFace() {
+    let src = '';
+    if (isPhotoView(view)) {
+      const ph = photos.find(p => 'p:' + p.id === view);
+      src = await ctx.src(ph.id);
+      if (!ph.ar) ph.ar = await imgSize(src);
+    }
+    canvas.innerHTML = viewSVG(view, items, photos, { src, cls: 'editing' });
+    $('#edSum', ed).textContent = items.length ? '全部：' + injSummary(items) : '尚未加入點位';
+    drawViews();
+  }
   drawPanel(); drawFace();
-  const toSvg = (svg, e) => { const m = svg.getScreenCTM().inverse(); const p = new DOMPoint(e.clientX, e.clientY).matrixTransform(m); return { x: Math.max(0, Math.min(300, p.x)), y: Math.max(0, Math.min(400, p.y)) }; };
+
+  const toSvg = (svg, e) => {
+    const vb = svg.viewBox.baseVal, m = svg.getScreenCTM().inverse(), p = new DOMPoint(e.clientX, e.clientY).matrixTransform(m);
+    return { x: Math.round(Math.max(0, Math.min(vb.width, p.x)) * 10) / 10, y: Math.round(Math.max(0, Math.min(vb.height, p.y)) * 10) / 10 };
+  };
+  const newItem = extra => ({ id: uid(), type: 'pt', view, dose: pref.dose, unit: pref.unit, depth: pref.depth, tool: pref.tool, product, note: '', ...extra });
   let drag = null;
-  const canvas = $('#edCanvas', ed);
   canvas.addEventListener('pointerdown', e => {
     const svg = $('svg', canvas); if (!svg) return;
-    const g = e.target.closest('.pt');
-    drag = { id: g?.dataset.id, sx: e.clientX, sy: e.clientY, moved: false, g, svg };
+    const g = e.target.closest('.it');
+    drag = { id: g?.dataset.id, g, svg, sx: e.clientX, sy: e.clientY, start: toSvg(svg, e), moved: false, tmp: null };
+    // 線模式從既有進針點拖曳：以同一進針點畫新線（扇形注射）
+    if (drag.id && pref.mode === 'line') { const it = items.find(i => i.id === drag.id); drag.from = { x: it.x, y: it.y }; }
     canvas.setPointerCapture(e.pointerId);
   });
   canvas.addEventListener('pointermove', e => {
-    if (!drag?.id) return;
+    if (!drag) return;
     if (!drag.moved && Math.hypot(e.clientX - drag.sx, e.clientY - drag.sy) < 6) return;
     drag.moved = true;
-    const p = pts.find(p => p.id === drag.id), q = toSvg(drag.svg, e);
-    p.x = Math.round(q.x * 10) / 10; p.y = Math.round(q.y * 10) / 10;
-    drag.g.setAttribute('transform', `translate(${p.x} ${p.y})`);
+    const q = toSvg(drag.svg, e), dx = q.x - drag.start.x, dy = q.y - drag.start.y;
+    if (drag.id && pref.mode !== 'line') {
+      const it = items.find(i => i.id === drag.id);
+      drag.g.setAttribute('transform', it.type === 'line' ? `translate(${dx} ${dy})` : `translate(${it.x + dx} ${it.y + dy})`);
+    } else if (pref.mode === 'line') {
+      if (!drag.tmp) {
+        drag.tmp = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+        drag.tmp.setAttribute('class', 'tmp');
+        drag.tmp.setAttribute('stroke', depthColor(pref.depth));
+        const f = drag.from || drag.start;
+        drag.tmp.setAttribute('x1', f.x); drag.tmp.setAttribute('y1', f.y);
+        $('.pts', drag.svg).appendChild(drag.tmp);
+      }
+      drag.tmp.setAttribute('x2', q.x); drag.tmp.setAttribute('y2', q.y);
+    }
   });
   canvas.addEventListener('pointerup', e => {
     const d = drag; drag = null;
     if (!d) return;
-    if (d.id) { if (d.moved) drawFace(); else editPoint(d.id); return; }
-    if (Math.hypot(e.clientX - d.sx, e.clientY - d.sy) > 8) return;
     const q = toSvg(d.svg, e);
-    pts.push({ id: uid(), x: Math.round(q.x * 10) / 10, y: Math.round(q.y * 10) / 10, dose: pref.dose, unit: pref.unit, depth: pref.depth, tool: pref.tool, note: '' });
+    if (d.id && !d.moved) { editItem(d.id); return; }
+    if (d.id && pref.mode !== 'line') {
+      const it = items.find(i => i.id === d.id), dx = q.x - d.start.x, dy = q.y - d.start.y;
+      const r = v => Math.round(v * 10) / 10;
+      it.x = r(it.x + dx); it.y = r(it.y + dy);
+      if (it.type === 'line') { it.x2 = r(it.x2 + dx); it.y2 = r(it.y2 + dy); }
+      drawFace(); return;
+    }
+    if (pref.mode === 'line') {
+      const f = d.from || d.start;
+      if (Math.hypot(q.x - f.x, q.y - f.y) < 8) { d.tmp?.remove(); toast('線模式：請從進針點拖曳畫線'); return; }
+      items.push(newItem({ type: 'line', x: f.x, y: f.y, x2: q.x, y2: q.y }));
+    } else {
+      if (d.moved) return;
+      items.push(newItem({ x: q.x, y: q.y }));
+    }
     drawFace();
     navigator.vibrate?.(8);
   });
-  canvas.addEventListener('pointercancel', () => { drag = null; });
-  function editPoint(id) {
-    const p = pts.find(p => p.id === id);
-    openSheet(`<h2>修改點位</h2><div class="form">
+  canvas.addEventListener('pointercancel', () => { drag?.tmp?.remove(); drag = null; });
+
+  function editItem(id) {
+    const p = items.find(p => p.id === id);
+    openSheet(`<h2>修改${p.type === 'line' ? '線' : '點位'}</h2><div class="form">
       <div class="grid2"><div class="field"><label>劑量</label><input id="pDose" type="number" inputmode="decimal" step="any" value="${esc(p.dose ?? '')}"></div>
       <div class="field"><label>單位</label><div class="seg" id="pUnit">${UNITS.map(u => `<button type="button" data-v="${u}" class="${p.unit === u ? 'on' : ''}">${u}</button>`).join('')}</div></div></div>
+      <div class="field"><label>產品</label><input id="pProd" list="dl-inj-prod" value="${esc(p.product || '')}" placeholder="例：Botox、Juvederm Voluma">
+        <datalist id="dl-inj-prod">${products.map(x => `<option value="${esc(x)}">`).join('')}</datalist></div>
       <div class="field"><label>層次</label><div class="chips" id="pDepth">${DEPTHS.map(([d, c]) => `<button type="button" class="chip" data-v="${d}" aria-pressed="${p.depth === d}"><i class="dot" style="background:${c}"></i>${d}</button>`).join('')}</div></div>
       <div class="field"><label>工具</label><div class="chips" id="pTool">${TOOLS.map(t => `<button type="button" class="chip" data-v="${t}" aria-pressed="${p.tool === t}">${t}</button>`).join('')}</div></div>
-      <div class="field"><label>備註</label><input id="pNote" value="${esc(p.note)}" placeholder="例：Volite、bolus、回抽"></div>
+      <div class="field"><label>備註</label><input id="pNote" value="${esc(p.note)}" placeholder="例：bolus、retrograde、回抽"></div>
       <div class="btnrow"><button class="btn danger" id="pDel">刪除</button><button class="btn primary" id="pSave">儲存</button></div></div>`, (sh, closeSh) => {
       let unit = p.unit, depth = p.depth, tool = p.tool;
       sh.addEventListener('click', e => {
@@ -178,39 +316,59 @@ function openInjEditor(initial, onDone) {
           if (grp === 'pDepth') depth = on ? b.dataset.v : ''; else tool = on ? b.dataset.v : '';
         }
       });
-      $('#pDel', sh).onclick = () => { pts = pts.filter(x => x.id !== id); closeSh(); drawFace(); };
+      $('#pDel', sh).onclick = () => { items = items.filter(x => x.id !== id); closeSh(); drawFace(); };
       $('#pSave', sh).onclick = () => {
-        const v = $('#pDose', sh).value;
-        Object.assign(p, { dose: v === '' ? '' : +v, unit, depth, tool, note: $('#pNote', sh).value.trim() });
+        const v = $('#pDose', sh).value, prod = $('#pProd', sh).value.trim();
+        Object.assign(p, { dose: v === '' ? '' : +v, unit, depth, tool, product: prod, note: $('#pNote', sh).value.trim() });
+        if (prod && !products.includes(prod)) { products.push(prod); drawPanel(); }
         closeSh(); drawFace();
       };
     });
   }
-  ed.addEventListener('click', e => {
+  async function choosePhoto() {
+    if (!photos.length) { toast('請先在病例中加入照片'); return; }
+    const pick = async ph => { view = 'p:' + ph.id; await drawFace(); };
+    if (photos.length === 1) return pick(photos[0]);
+    const urls = await Promise.all(photos.map(p => ctx.src(p.id)));
+    openSheet(`<h2>選擇要標記的照片</h2><div class="pgrid">${photos.map((p, i) => `<button class="ph" data-i="${i}"><img src="${urls[i]}" alt="">
+      <span class="lab">${esc(p.label)}${items.some(it => itemView(it) === 'p:' + p.id) ? ' ●' : ''}</span></button>`).join('')}</div>`, (sh, closeSh) => {
+      sh.addEventListener('click', e => { const b = e.target.closest('[data-i]'); if (b) { closeSh(); pick(photos[+b.dataset.i]); } });
+    });
+  }
+  ed.addEventListener('click', async e => {
     const t = e.target.closest('button'); if (!t || t.closest('#edCanvas')) return;
     const D = t.dataset;
-    if (D.unit) { pref.unit = D.unit; pref.dose = DOSE_PRESETS[D.unit][1]; }
+    if (D.view) { if (D.view === 'photo') choosePhoto(); else { view = D.view; drawFace(); } return; }
+    if (D.mode) pref.mode = D.mode;
+    else if (D.unit) { pref.unit = D.unit; pref.dose = DOSE_PRESETS[D.unit][1]; }
     else if (D.dose === 'custom') { const v = parseFloat(prompt(`輸入劑量（${pref.unit}）`, pref.dose)); if (!isNaN(v) && v > 0) pref.dose = v; }
     else if (D.dose) pref.dose = +D.dose;
+    else if (D.prodAdd) { const v = (prompt('產品名稱（例：Botox、Restylane Lyft）') || '').trim(); if (v) { if (!products.includes(v)) products.push(v); product = v; } }
+    else if (D.prod !== undefined) product = product === D.prod ? '' : D.prod;
     else if (D.depth) pref.depth = pref.depth === D.depth ? '' : D.depth;
     else if (D.tool) pref.tool = pref.tool === D.tool ? '' : D.tool;
-    else if (D.e === 'undo') { pts.pop(); drawFace(); return; }
-    else if (D.e === 'clear') { if (pts.length && confirm('清除所有點位？')) { pts = []; drawFace(); } return; }
-    else if (D.e === 'cancel') { if (JSON.stringify(pts) === JSON.stringify(initial || []) || confirm('放棄這次的修改？')) close(); return; }
-    else if (D.e === 'done') { close(); onDone(pts); return; }
+    else if (D.e === 'undo') { items.pop(); drawFace(); return; }
+    else if (D.e === 'clear') { const here = items.filter(i => itemView(i) === view).length; if (here && confirm('清除這張圖上的所有標記？')) { items = items.filter(i => itemView(i) !== view); drawFace(); } return; }
+    else if (D.e === 'cancel') { if (JSON.stringify(items) === JSON.stringify(initial || []) || confirm('放棄這次的修改？')) close(); return; }
+    else if (D.e === 'done') { close(); onDone(items); return; }
     else return;
     savePref(); drawPanel();
   });
 }
 function injBlock(c, editable) {
-  const pts = c.inj || [];
-  if (!pts.length && (!editable || !INJECTABLE.includes(c.category))) return '';
-  const notes = pts.filter(p => p.note);
-  return `<div class="block"><h3>注射點位 ${editable ? `<button class="btn sm" data-act="injEditCase" data-id="${c.id}">${pts.length ? '編輯' : '＋ 畫點位'}</button>` : ''}</h3>
-    ${pts.length ? `<div class="face-wrap">${faceSVG(pts)}</div><div class="injsum">${esc(injSummary(pts))}</div>${injLegend(pts)}
-      ${notes.length ? `<ul class="injnotes">${notes.map(p => `<li><b>${esc(ptLabel(p))}</b> ${injSide(p)}${p.depth ? '・' + p.depth : ''}${p.tool ? '・' + p.tool : ''}：${esc(p.note)}</li>`).join('')}</ul>` : ''}`
-      : '<div class="note">在臉部圖上標出施打點位與劑量，日後回顧更清楚。</div>'}</div>`;
+  const photos = c.photos || [];
+  const items = liveItems(c.inj, photos);
+  if (!items.length && (!editable || !INJECTABLE.includes(c.category))) return '';
+  const views = usedViews(items, photos), prods = productTotals(items), notes = items.filter(p => p.note);
+  return `<div class="block"><h3>注射點位 ${editable ? `<button class="btn sm" data-act="injEditCase" data-id="${c.id}">${items.length ? '編輯' : '＋ 畫點位'}</button>` : ''}</h3>
+    ${items.length ? `<div class="views ${views.length > 1 ? 'multi' : ''}">${views.map(v => `<figure>${viewSVG(v, items, photos)}<figcaption>${esc(viewName(v, photos))}</figcaption></figure>`).join('')}</div>
+      <div class="injsum">${esc(injSummary(items))}</div>
+      ${prods.length ? `<div class="prodsum">${prods.map(([k, t]) => `<span><b>${esc(k)}</b>${esc(t)}</span>`).join('')}</div>` : ''}
+      ${injLegend(items)}
+      ${notes.length ? `<ul class="injnotes">${notes.map(p => `<li><b>${p.type === 'line' ? '線 ' : ''}${esc(ptLabel(p))}</b> ${injSide(p)}${p.depth ? '・' + p.depth : ''}${p.tool ? '・' + p.tool : ''}${p.product ? '・' + esc(p.product) : ''}：${esc(p.note)}</li>`).join('')}</ul>` : ''}`
+      : '<div class="note">在臉部圖或病人照片上標出施打點位與劑量，日後回顧更清楚。</div>'}</div>`;
 }
+
 const SEX = ['女', '男', '其他'];
 const FITZ = ['I', 'II', 'III', 'IV', 'V', 'VI'];
 
@@ -285,7 +443,7 @@ function resize(im, max, q) {
 async function processPhoto(file) {
   const im = await loadImg(file);
   const [blob, thumb] = await Promise.all([resize(im, 1800, 0.85), resize(im, 360, 0.75)]);
-  return { blob, thumb };
+  return { blob, thumb, ar: im.naturalHeight / im.naturalWidth };
 }
 async function photoURL(id, kind = 'thumb') {
   const key = id + '|' + kind;
@@ -297,10 +455,11 @@ async function photoURL(id, kind = 'thumb') {
   return u;
 }
 async function hydrate(root = document) {
-  for (const im of $$('img[data-pid]', root)) {
-    if (im.src) continue;
+  for (const im of $$('img[data-pid], image[data-pid]', root)) {
+    const svgImg = im.tagName.toLowerCase() === 'image';
+    if (svgImg ? im.getAttribute('href') : im.src) continue;
     const u = await photoURL(im.dataset.pid, im.dataset.kind || 'thumb');
-    if (u) im.src = u;
+    if (u) svgImg ? im.setAttribute('href', u) : (im.src = u);
   }
 }
 function forgetPhoto(id) {
@@ -377,8 +536,8 @@ async function filesToPhotos(files, label, date) {
   if (files.length) toast(`處理 ${files.length} 張照片中…`);
   for (const f of files) {
     try {
-      const { blob, thumb } = await processPhoto(f);
-      out.push({ id: uid(), label, date, blob, thumb, url: URL.createObjectURL(thumb) });
+      const { blob, thumb, ar } = await processPhoto(f);
+      out.push({ id: uid(), label, date, blob, thumb, ar, url: URL.createObjectURL(thumb) });
     } catch (e) { toast('有照片無法讀取（HEIC 請改用「最相容」格式）'); }
   }
   return out;
@@ -402,7 +561,7 @@ function render() {
   $$('#tabbar a[data-tab]').forEach(a => a.classList.toggle('active', a.dataset.tab === (name || 'home')));
   const scrollKey = 'scroll:' + location.hash;
   $('#view').onclick = null;
-  $$('.overlay,.viewer').forEach(o => o.remove()); document.body.style.overflow = '';
+  $$('.overlay,.viewer,.inj-ed').forEach(o => o.remove()); document.body.style.overflow = '';
   view(arg ? decodeURIComponent(arg) : undefined);
   hydrate($('#view'));
   window.scrollTo(0, +sessionStorage.getItem(scrollKey) || 0);
@@ -535,7 +694,7 @@ function summaryText(c) {
     (c.concerns || []).length && `主訴：${c.concerns.join('、')}`,
     (c.areas || []).length && `部位：${c.areas.join('、')}`,
     c.product && `產品：${c.product}`, c.dose && `劑量：${c.dose}`, c.technique && `技術/參數：${c.technique}`,
-    (c.inj || []).length && `注射：${injSummary(c.inj)}`,
+    (c.inj || []).length && `注射：${injSummary(c.inj)}${productText(c.inj) ? '\n產品用量：' + productText(c.inj) : ''}`,
     c.outcome && `效果：${starsText(c.outcome)}`,
     (c.complications || []).length && `併發症：${c.complications.join('、')}`, c.cxNote && `處理：${c.cxNote}`,
     c.pearl && `\n💡 Pearl：${c.pearl}`, c.differently && `下次會：${c.differently}`,
@@ -608,7 +767,7 @@ function openFollowUp(c) {
           await idb.put('photos', { id: p.id, caseId: c.id, blob: p.blob, thumb: p.thumb });
           URL.revokeObjectURL(p.url);
         }
-        c.photos = [...(c.photos || []), ...newPhotos.map(p => ({ id: p.id, label: '術後', date, fuId: fu.id }))];
+        c.photos = [...(c.photos || []), ...newPhotos.map(p => ({ id: p.id, label: '術後', date, ar: p.ar, fuId: fu.id }))];
         c.followups = [...(c.followups || []), fu];
         c.nextFU = $('#fuNext', sh).value || '';
         if ($('#fuDone', sh).checked) c.status = 'done';
@@ -694,11 +853,15 @@ function viewForm(id) {
   if (!existing) setTimeout(() => $('#f-title')?.focus(), 50);
 }
 const FIELD_MAP = { category: 'category', sex: 'sex', fitz: 'fitz', concern: 'concerns', area: 'areas', complication: 'complications', tag: 'tags', status: 'status' };
+const formPhotos = () => [...(draft.photos || []).filter(p => !draft._removed.includes(p.id)), ...draft._new];
 function drawInjPreview() {
-  const pts = draft.inj || [];
+  const photos = formPhotos(), items = liveItems(draft.inj, photos), views = usedViews(items, photos), v = views[0];
+  const n = v && draft._new.find(p => 'p:' + p.id === v);
   $('#injPreview').innerHTML = `<button type="button" class="injprev" data-act="injEdit">
-    ${pts.length ? faceSVG(pts) : `<span class="ph addph" style="aspect-ratio:auto;height:100%">${ICON.plus}<span>畫點位</span></span>`}
-    <span class="injprev-t"><b>${pts.length ? '編輯點位' : '在臉部圖上標記'}</b><span class="note">${pts.length ? esc(injSummary(pts)) : '點選施打位置，記錄劑量、層次、針或鈍針'}</span></span></button>`;
+    ${v ? viewSVG(v, items, photos, { src: n ? n.url : '' }) : `<span class="ph addph" style="aspect-ratio:auto;height:100%">${ICON.plus}<span>畫點位</span></span>`}
+    <span class="injprev-t"><b>${items.length ? '編輯點位' : '在臉部圖上標記'}</b><span class="note">${items.length
+      ? esc(injSummary(items)) + (views.length > 1 ? `・${views.length} 張圖` : '') : '正面、側面或病人照片；點或鈍針線；劑量、產品、層次'}</span></span></button>`;
+  hydrate($('#injPreview'));
 }
 function drawFormPhotos() {
   const all = [...(draft.photos || []).filter(p => !draft._removed.includes(p.id)).map(p => ({ ...p, saved: true })), ...draft._new];
@@ -854,7 +1017,7 @@ async function viewSettings() {
     <button data-act="resetCustom"><div class="grow">清除自訂的選項<div class="sub">已加入的自訂部位、類別、標籤等</div></div></button>
     <button data-act="wipe" style="color:var(--warn)">${ICON.trash.replace('<svg', '<svg style="color:var(--warn)"')}<div class="grow">刪除全部資料</div></button>
   </div>
-  <div class="note" style="text-align:center">Case Log v2</div>`;
+  <div class="note" style="text-align:center">Case Log v3</div>`;
   if (navigator.storage?.estimate) {
     const { usage } = await navigator.storage.estimate();
     const persisted = await navigator.storage.persisted?.();
@@ -910,7 +1073,7 @@ function exportCSV() {
     ['complications', '併發症'], ['cxNote', '併發症處理'], ['pearl', 'Pearl'], ['differently', '下次會怎麼做'], ['notes', '筆記'],
     ['refs', '參考資料'], ['tags', '標籤'], ['status', '狀態'], ['nextFU', '下次回診'], ['followups', '回診紀錄'], ['inj', '注射點位']];
   const cell = v => `"${String(v ?? '').replace(/"/g, '""')}"`;
-  const val = (c, k) => k === 'inj' ? injSummary(c.inj) : k === 'followups' ? (c.followups || []).map(f => `${f.date} ${f.note}`).join(' | ')
+  const val = (c, k) => k === 'inj' ? [injSummary(c.inj), productText(c.inj || [])].filter(Boolean).join('；') : k === 'followups' ? (c.followups || []).map(f => `${f.date} ${f.note}`).join(' | ')
     : k === 'status' ? (c.status === 'done' ? '已結案' : '追蹤中') : Array.isArray(c[k]) ? c[k].join('、') : c[k] || '';
   const csv = '﻿' + [cols.map(c => cell(c[1])).join(','), ...S.cases.map(c => cols.map(([k]) => cell(val(c, k))).join(','))].join('\r\n');
   shareOrDownload(new Blob([csv], { type: 'text/csv' }), `caselog-${today()}.csv`);
@@ -918,10 +1081,17 @@ function exportCSV() {
 
 // ---------- actions (event delegation) ----------
 const actions = {
-  injEdit() { openInjEditor(draft.inj, pts => { draft.inj = pts; drawInjPreview(); }); },
+  injEdit() {
+    openInjEditor(draft.inj, {
+      photos: formPhotos(),
+      src: async id => { const n = draft._new.find(p => p.id === id); return n ? (n.full ||= URL.createObjectURL(n.blob)) : photoURL(id, 'full'); },
+      products: productChoices(splitProducts($('#f-product')?.value)),
+    }, items => { draft.inj = items; drawInjPreview(); });
+  },
   injEditCase(el) {
     const c = byId(el.dataset.id);
-    openInjEditor(c.inj, async pts => { c.inj = pts; await saveCase(c); toast('已儲存點位'); render(); });
+    openInjEditor(c.inj, { photos: c.photos || [], src: id => photoURL(id, 'full'), products: productChoices(splitProducts(c.product)) },
+      async items => { c.inj = items; await saveCase(c); toast('已儲存點位'); render(); });
   },
   back: () => back(),
   go: el => go(el.dataset.href),
@@ -982,7 +1152,7 @@ const actions = {
     const id = el.dataset.id;
     const i = draft._new.findIndex(p => p.id === id);
     if (i >= 0) { URL.revokeObjectURL(draft._new[i].url); draft._new.splice(i, 1); } else draft._removed.push(id);
-    drawFormPhotos();
+    drawFormPhotos(); drawInjPreview();
   },
   async saveForm() {
     const form = $('#caseForm'); if (!form) return;
@@ -995,10 +1165,11 @@ const actions = {
     d.starred = fd.get('starred') === 'on';
     for (const p of d._new) {
       await idb.put('photos', { id: p.id, caseId: d.id, blob: p.blob, thumb: p.thumb });
-      URL.revokeObjectURL(p.url);
+      URL.revokeObjectURL(p.url); if (p.full) URL.revokeObjectURL(p.full);
     }
     for (const id of d._removed) { forgetPhoto(id); await idb.del('photos', id); }
-    d.photos = [...(d.photos || []).filter(p => !d._removed.includes(p.id)), ...d._new.map(({ id, label, date }) => ({ id, label, date }))];
+    d.photos = [...(d.photos || []).filter(p => !d._removed.includes(p.id)), ...d._new.map(({ id, label, date, ar }) => ({ id, label, date, ar }))];
+    d.inj = liveItems(d.inj, d.photos);
     const isNew = !byId(d.id);
     const { _new, _removed, _markClean, ...clean } = d;
     _markClean?.();

@@ -40,6 +40,177 @@ const BASE = {
   tag: ['教科書等級', '罕見', '失敗經驗', '併發症處理', '新技術', '聯合療程', '值得發表', '病人溝通'],
 };
 const PHOTO_LABELS = ['術前', '術中', '術後', '其他'];
+const INJECTABLE = ['肉毒', '玻尿酸', '膠原增生', '水光/皮膚', '埋線'];
+
+// ---------- injection map (注射點位圖) ----------
+// 座標使用 viewBox 0 0 300 400；x < 150 為病人右側（畫面左側）
+const DEPTHS = [['皮內', '#0284c7'], ['皮下', '#16a34a'], ['肌肉', '#db2777'], ['骨膜上', '#7c3aed']];
+const TOOLS = ['針', '鈍針'];
+const UNITS = ['U', 'cc'];
+const DOSE_PRESETS = { U: [1, 2, 2.5, 4, 5, 10], cc: [0.05, 0.1, 0.2, 0.3, 0.5, 1] };
+const depthColor = d => (DEPTHS.find(x => x[0] === d) || [])[1] || '#e0a800';
+const fmtN = n => String(+(+n).toFixed(3));
+const injSide = p => p.x < 145 ? '右' : p.x > 155 ? '左' : '中';
+const ptLabel = p => p.dose ? fmtN(p.dose) + (p.unit || '') : '';
+function injTotals(pts, filter = () => true) {
+  const t = {};
+  for (const p of pts) if (filter(p) && +p.dose) t[p.unit] = (t[p.unit] || 0) + +p.dose;
+  return Object.entries(t).map(([u, v]) => fmtN(v) + ' ' + u).join(' + ');
+}
+function injSummary(pts) {
+  if (!pts?.length) return '';
+  const all = injTotals(pts), r = injTotals(pts, p => injSide(p) === '右'), l = injTotals(pts, p => injSide(p) === '左'), m = injTotals(pts, p => injSide(p) === '中');
+  return `${pts.length} 點${all ? '，總量 ' + all : ''}${r || l ? `（右 ${r || 0}／左 ${l || 0}${m ? '／中線 ' + m : ''}）` : ''}`;
+}
+const FACE = `<g class="face-lines" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+  <path class="soft" stroke-dasharray="2 4" d="M150 44V338"/>
+  <path d="M150 40C95 40 70 80 68 140C66 180 70 215 78 245C88 285 110 320 130 335C140 342 160 342 170 335C190 320 212 285 222 245C230 215 234 180 232 140C230 80 205 40 150 40Z"/>
+  <path class="soft" stroke-dasharray="4 4" d="M78 118C92 74 208 74 222 118"/>
+  <path d="M69 150C55 145 52 170 56 185C60 200 66 205 74 204M231 150C245 145 248 170 244 185C240 200 234 205 226 204"/>
+  <path d="M94 141C107 130 125 130 139 137M161 137C175 130 193 130 206 141"/>
+  <path d="M100 160C110 151 128 151 137 161C128 166 110 166 100 160ZM163 161C172 151 190 151 200 160C190 166 172 166 163 161Z"/>
+  <circle cx="118.5" cy="158.5" r="4.5"/><circle cx="181.5" cy="158.5" r="4.5"/>
+  <path class="soft" d="M104 171C115 179 128 177 136 171M164 171C172 177 185 179 196 171"/>
+  <path class="soft" d="M144 168C143 188 140 204 136 214M156 168C157 188 160 204 164 214"/>
+  <path d="M132 218C135 229 143 229 150 225C157 229 165 229 168 218"/>
+  <path class="soft" d="M129 222C118 238 115 255 120 270M171 222C182 238 185 255 180 270"/>
+  <path d="M121 262C134 253 143 255 150 259C157 255 166 253 179 262C164 280 136 280 121 262Z"/><path d="M121 262C140 267 160 267 179 262"/>
+  <path class="soft" d="M124 274C121 286 123 296 128 303M176 274C179 286 177 296 172 303"/>
+  <path class="soft" d="M138 312C145 318 155 318 162 312"/>
+  <path d="M113 329L108 396M187 329L192 396"/>
+</g>
+<text x="16" y="24" class="side-lbl">R</text><text x="284" y="24" class="side-lbl" text-anchor="end">L</text>`;
+function faceSVG(pts = [], cls = '') {
+  return `<svg class="face ${cls}" viewBox="0 0 300 400" role="img" aria-label="臉部注射點位圖">${FACE}<g class="pts">${pts.map(p =>
+    `<g class="pt" data-id="${p.id}" transform="translate(${p.x} ${p.y})"><circle class="hit" r="12" fill="transparent"/>
+      <circle r="5.5" fill="${depthColor(p.depth)}" stroke="#fff" stroke-width="1.6"/>
+      ${p.dose ? `<text x="8" y="3.5" class="dose">${esc(ptLabel(p))}</text>` : ''}</g>`).join('')}</g></svg>`;
+}
+function injLegend(pts) {
+  const used = DEPTHS.filter(([d]) => pts.some(p => p.depth === d));
+  if (pts.some(p => !p.depth)) used.push(['未標層次', depthColor('')]);
+  return used.length > 1 || (used.length && used[0][0] !== '未標層次')
+    ? `<div class="legend">${used.map(([d, c]) => `<span><i style="background:${c}"></i>${d}</span>`).join('')}</div>` : '';
+}
+function loadInjPrefs() {
+  try { return Object.assign({ unit: 'U', dose: 2, depth: '', tool: '' }, JSON.parse(localStorage.getItem('injPrefs') || '{}')); }
+  catch { return { unit: 'U', dose: 2, depth: '', tool: '' }; }
+}
+// 全螢幕點位編輯器：點臉部新增點、拖曳移動、點一下已有的點可修改
+function openInjEditor(initial, onDone) {
+  let pts = structuredClone(initial || []);
+  const pref = loadInjPrefs();
+  const ed = document.createElement('div');
+  ed.className = 'inj-ed';
+  document.body.appendChild(ed);
+  document.body.style.overflow = 'hidden';
+  const close = () => { ed.remove(); if (!$('.overlay')) document.body.style.overflow = ''; };
+  const savePref = () => { try { localStorage.setItem('injPrefs', JSON.stringify(pref)); } catch {} };
+  ed.innerHTML = `<div class="ed-top"><button class="btn sm" data-e="cancel">取消</button><b>注射點位</b><button class="btn sm primary" data-e="done">完成</button></div>
+    <div class="ed-canvas" id="edCanvas"></div>
+    <div class="ed-panel">
+      <div class="ed-sum" id="edSum"></div>
+      <div class="ed-row"><div class="seg ed-unit">${UNITS.map(u => `<button data-unit="${u}">${u}</button>`).join('')}</div>
+        <div class="hscroll ed-doses" id="edDoses"></div></div>
+      <div class="ed-row"><span class="ed-lbl">層次</span><div class="hscroll" id="edDepth">${DEPTHS.map(([d, c]) => `<button class="chip" data-depth="${d}"><i class="dot" style="background:${c}"></i>${d}</button>`).join('')}</div></div>
+      <div class="ed-row"><span class="ed-lbl">工具</span><div class="chips" id="edTool">${TOOLS.map(t => `<button class="chip" data-tool="${t}">${t}</button>`).join('')}</div>
+        <span style="flex:1"></span><button class="btn sm" data-e="undo">復原</button><button class="btn sm" data-e="clear">清除</button></div>
+      <div class="note ed-hint">先選好劑量，再點臉部新增。按住點可拖曳；點一下可修改或刪除。</div>
+    </div>`;
+  const drawPanel = () => {
+    $$('[data-unit]', ed).forEach(b => b.classList.toggle('on', b.dataset.unit === pref.unit));
+    $('#edDoses', ed).innerHTML = DOSE_PRESETS[pref.unit].map(v => `<button class="chip" data-dose="${v}" aria-pressed="${+pref.dose === v}">${v}</button>`).join('')
+      + `<button class="chip add" data-dose="custom" aria-pressed="${!DOSE_PRESETS[pref.unit].includes(+pref.dose)}">${DOSE_PRESETS[pref.unit].includes(+pref.dose) ? '其他' : fmtN(pref.dose)}</button>`;
+    $$('[data-depth]', ed).forEach(b => b.setAttribute('aria-pressed', b.dataset.depth === pref.depth));
+    $$('[data-tool]', ed).forEach(b => b.setAttribute('aria-pressed', b.dataset.tool === pref.tool));
+  };
+  const drawFace = () => {
+    $('#edCanvas', ed).innerHTML = faceSVG(pts, 'editing');
+    $('#edSum', ed).textContent = pts.length ? injSummary(pts) : '尚未加入點位';
+  };
+  drawPanel(); drawFace();
+  const toSvg = (svg, e) => { const m = svg.getScreenCTM().inverse(); const p = new DOMPoint(e.clientX, e.clientY).matrixTransform(m); return { x: Math.max(0, Math.min(300, p.x)), y: Math.max(0, Math.min(400, p.y)) }; };
+  let drag = null;
+  const canvas = $('#edCanvas', ed);
+  canvas.addEventListener('pointerdown', e => {
+    const svg = $('svg', canvas); if (!svg) return;
+    const g = e.target.closest('.pt');
+    drag = { id: g?.dataset.id, sx: e.clientX, sy: e.clientY, moved: false, g, svg };
+    canvas.setPointerCapture(e.pointerId);
+  });
+  canvas.addEventListener('pointermove', e => {
+    if (!drag?.id) return;
+    if (!drag.moved && Math.hypot(e.clientX - drag.sx, e.clientY - drag.sy) < 6) return;
+    drag.moved = true;
+    const p = pts.find(p => p.id === drag.id), q = toSvg(drag.svg, e);
+    p.x = Math.round(q.x * 10) / 10; p.y = Math.round(q.y * 10) / 10;
+    drag.g.setAttribute('transform', `translate(${p.x} ${p.y})`);
+  });
+  canvas.addEventListener('pointerup', e => {
+    const d = drag; drag = null;
+    if (!d) return;
+    if (d.id) { if (d.moved) drawFace(); else editPoint(d.id); return; }
+    if (Math.hypot(e.clientX - d.sx, e.clientY - d.sy) > 8) return;
+    const q = toSvg(d.svg, e);
+    pts.push({ id: uid(), x: Math.round(q.x * 10) / 10, y: Math.round(q.y * 10) / 10, dose: pref.dose, unit: pref.unit, depth: pref.depth, tool: pref.tool, note: '' });
+    drawFace();
+    navigator.vibrate?.(8);
+  });
+  canvas.addEventListener('pointercancel', () => { drag = null; });
+  function editPoint(id) {
+    const p = pts.find(p => p.id === id);
+    openSheet(`<h2>修改點位</h2><div class="form">
+      <div class="grid2"><div class="field"><label>劑量</label><input id="pDose" type="number" inputmode="decimal" step="any" value="${esc(p.dose ?? '')}"></div>
+      <div class="field"><label>單位</label><div class="seg" id="pUnit">${UNITS.map(u => `<button type="button" data-v="${u}" class="${p.unit === u ? 'on' : ''}">${u}</button>`).join('')}</div></div></div>
+      <div class="field"><label>層次</label><div class="chips" id="pDepth">${DEPTHS.map(([d, c]) => `<button type="button" class="chip" data-v="${d}" aria-pressed="${p.depth === d}"><i class="dot" style="background:${c}"></i>${d}</button>`).join('')}</div></div>
+      <div class="field"><label>工具</label><div class="chips" id="pTool">${TOOLS.map(t => `<button type="button" class="chip" data-v="${t}" aria-pressed="${p.tool === t}">${t}</button>`).join('')}</div></div>
+      <div class="field"><label>備註</label><input id="pNote" value="${esc(p.note)}" placeholder="例：Volite、bolus、回抽"></div>
+      <div class="btnrow"><button class="btn danger" id="pDel">刪除</button><button class="btn primary" id="pSave">儲存</button></div></div>`, (sh, closeSh) => {
+      let unit = p.unit, depth = p.depth, tool = p.tool;
+      sh.addEventListener('click', e => {
+        const b = e.target.closest('[data-v]'); if (!b) return;
+        const grp = b.parentElement.id;
+        if (grp === 'pUnit') { unit = b.dataset.v; $$('#pUnit button', sh).forEach(x => x.classList.toggle('on', x === b)); }
+        if (grp === 'pDepth' || grp === 'pTool') {
+          const on = b.getAttribute('aria-pressed') !== 'true';
+          $$('button', b.parentElement).forEach(x => x.setAttribute('aria-pressed', 'false'));
+          b.setAttribute('aria-pressed', on);
+          if (grp === 'pDepth') depth = on ? b.dataset.v : ''; else tool = on ? b.dataset.v : '';
+        }
+      });
+      $('#pDel', sh).onclick = () => { pts = pts.filter(x => x.id !== id); closeSh(); drawFace(); };
+      $('#pSave', sh).onclick = () => {
+        const v = $('#pDose', sh).value;
+        Object.assign(p, { dose: v === '' ? '' : +v, unit, depth, tool, note: $('#pNote', sh).value.trim() });
+        closeSh(); drawFace();
+      };
+    });
+  }
+  ed.addEventListener('click', e => {
+    const t = e.target.closest('button'); if (!t || t.closest('#edCanvas')) return;
+    const D = t.dataset;
+    if (D.unit) { pref.unit = D.unit; pref.dose = DOSE_PRESETS[D.unit][1]; }
+    else if (D.dose === 'custom') { const v = parseFloat(prompt(`輸入劑量（${pref.unit}）`, pref.dose)); if (!isNaN(v) && v > 0) pref.dose = v; }
+    else if (D.dose) pref.dose = +D.dose;
+    else if (D.depth) pref.depth = pref.depth === D.depth ? '' : D.depth;
+    else if (D.tool) pref.tool = pref.tool === D.tool ? '' : D.tool;
+    else if (D.e === 'undo') { pts.pop(); drawFace(); return; }
+    else if (D.e === 'clear') { if (pts.length && confirm('清除所有點位？')) { pts = []; drawFace(); } return; }
+    else if (D.e === 'cancel') { if (JSON.stringify(pts) === JSON.stringify(initial || []) || confirm('放棄這次的修改？')) close(); return; }
+    else if (D.e === 'done') { close(); onDone(pts); return; }
+    else return;
+    savePref(); drawPanel();
+  });
+}
+function injBlock(c, editable) {
+  const pts = c.inj || [];
+  if (!pts.length && (!editable || !INJECTABLE.includes(c.category))) return '';
+  const notes = pts.filter(p => p.note);
+  return `<div class="block"><h3>注射點位 ${editable ? `<button class="btn sm" data-act="injEditCase" data-id="${c.id}">${pts.length ? '編輯' : '＋ 畫點位'}</button>` : ''}</h3>
+    ${pts.length ? `<div class="face-wrap">${faceSVG(pts)}</div><div class="injsum">${esc(injSummary(pts))}</div>${injLegend(pts)}
+      ${notes.length ? `<ul class="injnotes">${notes.map(p => `<li><b>${esc(ptLabel(p))}</b> ${injSide(p)}${p.depth ? '・' + p.depth : ''}${p.tool ? '・' + p.tool : ''}：${esc(p.note)}</li>`).join('')}</ul>` : ''}`
+      : '<div class="note">在臉部圖上標出施打點位與劑量，日後回顧更清楚。</div>'}</div>`;
+}
 const SEX = ['女', '男', '其他'];
 const FITZ = ['I', 'II', 'III', 'IV', 'V', 'VI'];
 
@@ -335,6 +506,7 @@ function viewCase(id) {
   ${c.pearl ? `<div class="block pearl"><h3>💡 學習重點 PEARL</h3><p>${esc(c.pearl)}</p></div>` : ''}
   ${c.differently ? `<div class="block"><h3>下次我會怎麼做</h3><p class="text">${esc(c.differently)}</p></div>` : ''}
   ${kv.length ? `<div class="block"><h3>病例資料</h3><dl class="kv">${kv.map(([k, v]) => `<dt>${k}</dt><dd>${esc(v)}</dd>`).join('')}</dl></div>` : ''}
+  ${injBlock(c, true)}
   ${(c.complications || []).length || c.cxNote ? `<div class="block" style="border-color:var(--warn)"><h3 style="color:var(--warn)">併發症與處理</h3>
     ${(c.complications || []).length ? `<div class="chips" style="margin-bottom:8px">${c.complications.map(x => `<span class="tag warn">${esc(x)}</span>`).join('')}</div>` : ''}
     ${c.cxNote ? `<p class="text">${esc(c.cxNote)}</p>` : ''}</div>` : ''}
@@ -363,6 +535,7 @@ function summaryText(c) {
     (c.concerns || []).length && `主訴：${c.concerns.join('、')}`,
     (c.areas || []).length && `部位：${c.areas.join('、')}`,
     c.product && `產品：${c.product}`, c.dose && `劑量：${c.dose}`, c.technique && `技術/參數：${c.technique}`,
+    (c.inj || []).length && `注射：${injSummary(c.inj)}`,
     c.outcome && `效果：${starsText(c.outcome)}`,
     (c.complications || []).length && `併發症：${c.complications.join('、')}`, c.cxNote && `處理：${c.cxNote}`,
     c.pearl && `\n💡 Pearl：${c.pearl}`, c.differently && `下次會：${c.differently}`,
@@ -454,10 +627,10 @@ function viewForm(id) {
   if (id && !existing) { go('#/'); return; }
   draft = existing ? structuredClone({ ...existing }) : {
     id: uid(), createdAt: Date.now(), date: today(), title: '', category: '', code: '', age: '', sex: '', fitz: '',
-    concerns: [], areas: [], product: '', dose: '', technique: '', outcome: 0, complications: [], cxNote: '',
+    concerns: [], areas: [], inj: [], product: '', dose: '', technique: '', outcome: 0, complications: [], cxNote: '',
     pearl: '', differently: '', notes: '', refs: '', tags: [], starred: false, status: 'open', nextFU: '', followups: [], photos: [],
   };
-  draft._new = []; draft._removed = [];
+  draft._new = []; draft._removed = []; draft.inj = draft.inj || [];
   let dirty = false;
   leaveGuard = () => !dirty || confirm('尚未儲存，確定要離開嗎？');
   const products = [...new Set(S.cases.map(c => c.product).filter(Boolean))];
@@ -488,6 +661,7 @@ function viewForm(id) {
       <div class="field"><label for="f-product">產品 / 儀器</label><input id="f-product" name="product" list="dl-products" value="${esc(d.product)}" placeholder="例：Juvederm Volbella、Pico 755"></div>
       <datalist id="dl-products">${products.map(p => `<option value="${esc(p)}">`).join('')}</datalist>
       <div class="field"><label for="f-dose">劑量</label><input id="f-dose" name="dose" value="${esc(d.dose)}" placeholder="例：每側 0.5 cc／20 U／1200 shots"></div>
+      <div class="field"><label>注射點位圖</label><div id="injPreview"></div></div>
       <div class="field"><label for="f-tech">技術 / 參數</label><textarea id="f-tech" name="technique" placeholder="針 or cannula、層次、進針點、能量設定…">${esc(d.technique)}</textarea></div>
     </section>
     <section><h3>結果</h3>
@@ -511,6 +685,7 @@ function viewForm(id) {
   </form>
   <div class="savebar"><div class="inner btnrow"><button class="btn" data-act="back">取消</button><button class="btn primary" data-act="saveForm">儲存</button></div></div>`;
   drawFormPhotos();
+  drawInjPreview();
   const form = $('#caseForm');
   form.addEventListener('input', () => { dirty = true; });
   form.addEventListener('click', e => { if (e.target.closest('[data-act]')) dirty = true; });
@@ -519,6 +694,12 @@ function viewForm(id) {
   if (!existing) setTimeout(() => $('#f-title')?.focus(), 50);
 }
 const FIELD_MAP = { category: 'category', sex: 'sex', fitz: 'fitz', concern: 'concerns', area: 'areas', complication: 'complications', tag: 'tags', status: 'status' };
+function drawInjPreview() {
+  const pts = draft.inj || [];
+  $('#injPreview').innerHTML = `<button type="button" class="injprev" data-act="injEdit">
+    ${pts.length ? faceSVG(pts) : `<span class="ph addph" style="aspect-ratio:auto;height:100%">${ICON.plus}<span>畫點位</span></span>`}
+    <span class="injprev-t"><b>${pts.length ? '編輯點位' : '在臉部圖上標記'}</b><span class="note">${pts.length ? esc(injSummary(pts)) : '點選施打位置，記錄劑量、層次、針或鈍針'}</span></span></button>`;
+}
 function drawFormPhotos() {
   const all = [...(draft.photos || []).filter(p => !draft._removed.includes(p.id)).map(p => ({ ...p, saved: true })), ...draft._new];
   $('#photos').innerHTML = all.map(p => `<div class="ph">
@@ -606,6 +787,7 @@ function randomReview() {
     <div id="ans" hidden>
       ${c.pearl ? `<div class="block pearl"><h3>💡 PEARL</h3><p>${esc(c.pearl)}</p></div>` : ''}
       ${c.differently ? `<div class="block"><h3>下次我會怎麼做</h3><p class="text">${esc(c.differently)}</p></div>` : ''}
+      ${injBlock(c, false)}
       <div class="btnrow"><a class="btn" href="#/case/${c.id}" id="open">看完整病例</a><button class="btn primary" id="again">下一個</button></div>
     </div>`, (sh, close) => {
     hydrate(sh);
@@ -672,7 +854,7 @@ async function viewSettings() {
     <button data-act="resetCustom"><div class="grow">清除自訂的選項<div class="sub">已加入的自訂部位、類別、標籤等</div></div></button>
     <button data-act="wipe" style="color:var(--warn)">${ICON.trash.replace('<svg', '<svg style="color:var(--warn)"')}<div class="grow">刪除全部資料</div></button>
   </div>
-  <div class="note" style="text-align:center">Case Log v1</div>`;
+  <div class="note" style="text-align:center">Case Log v2</div>`;
   if (navigator.storage?.estimate) {
     const { usage } = await navigator.storage.estimate();
     const persisted = await navigator.storage.persisted?.();
@@ -726,9 +908,9 @@ function exportCSV() {
   const cols = [['date', '日期'], ['title', '標題'], ['category', '類別'], ['code', '代號'], ['age', '年齡'], ['sex', '性別'], ['fitz', 'Fitzpatrick'],
     ['concerns', '主訴'], ['areas', '部位'], ['product', '產品'], ['dose', '劑量'], ['technique', '技術參數'], ['outcome', '效果'],
     ['complications', '併發症'], ['cxNote', '併發症處理'], ['pearl', 'Pearl'], ['differently', '下次會怎麼做'], ['notes', '筆記'],
-    ['refs', '參考資料'], ['tags', '標籤'], ['status', '狀態'], ['nextFU', '下次回診'], ['followups', '回診紀錄']];
+    ['refs', '參考資料'], ['tags', '標籤'], ['status', '狀態'], ['nextFU', '下次回診'], ['followups', '回診紀錄'], ['inj', '注射點位']];
   const cell = v => `"${String(v ?? '').replace(/"/g, '""')}"`;
-  const val = (c, k) => k === 'followups' ? (c.followups || []).map(f => `${f.date} ${f.note}`).join(' | ')
+  const val = (c, k) => k === 'inj' ? injSummary(c.inj) : k === 'followups' ? (c.followups || []).map(f => `${f.date} ${f.note}`).join(' | ')
     : k === 'status' ? (c.status === 'done' ? '已結案' : '追蹤中') : Array.isArray(c[k]) ? c[k].join('、') : c[k] || '';
   const csv = '﻿' + [cols.map(c => cell(c[1])).join(','), ...S.cases.map(c => cols.map(([k]) => cell(val(c, k))).join(','))].join('\r\n');
   shareOrDownload(new Blob([csv], { type: 'text/csv' }), `caselog-${today()}.csv`);
@@ -736,6 +918,11 @@ function exportCSV() {
 
 // ---------- actions (event delegation) ----------
 const actions = {
+  injEdit() { openInjEditor(draft.inj, pts => { draft.inj = pts; drawInjPreview(); }); },
+  injEditCase(el) {
+    const c = byId(el.dataset.id);
+    openInjEditor(c.inj, async pts => { c.inj = pts; await saveCase(c); toast('已儲存點位'); render(); });
+  },
   back: () => back(),
   go: el => go(el.dataset.href),
   seg: el => { S.filter.seg = S.filter.seg === el.dataset.val && el.dataset.val !== 'all' ? 'all' : el.dataset.val; render(); },

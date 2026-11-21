@@ -24,3 +24,8 @@
 2. 用 **Safari** 開啟網址 → 分享 →「加入主畫面」
 
 > 資料存在「這支手機的這個瀏覽器」。刪除 App 或清除 Safari 網站資料，病例會一起被刪除，請定期在「設定」裡備份。
+
+## 我的 App（`apps/`）
+所有程式的入口頁：日記帳本、我的部位、班表、客人管理、Case Log 和兩份試算表。
+GitHub Pages 開好後網址是 `https://georgegozari.github.io/George/apps/`，用 Safari 打開 → 分享 →「加入主畫面」。
+App 清單在 `apps/index.html` 的 `GROUPS`；改了檔案要記得把 `apps/sw.js` 的 `VERSION` 加一。

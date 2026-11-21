@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>我的 App</title>
+<meta name="theme-color" content="#F3F7F6" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0E1615" media="(prefers-color-scheme: dark)">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="我的 App">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@600;800&family=Noto+Sans+TC:wght@400;500;700&display=swap">
+<style>
+/* Layout: one column of grouped app tiles, like a phone home screen with labels */
+:root{
+  --bg:#F3F7F6; --card:#FFFFFF; --fg:#13201E; --muted:#5E6E6B; --line:#DCE6E4;
+  --accent:#0E9384; --accent-soft:#E2F3F1; --warn:#B54708; --warn-soft:#FEF0E1;
+  --t-money:#0E9384; --t-pos:#2E6BD6; --t-shift:#7A4FD0; --t-client:#D2557A; --t-case:#C98A0E; --t-sheet:#1F8A4C;
+  --f-text:"Noto Sans TC","PingFang TC","Microsoft JhengHei",system-ui,sans-serif;
+  --f-num:"Manrope","Noto Sans TC",system-ui,sans-serif;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#0E1615; --card:#17211F; --fg:#E8F0EE; --muted:#93A4A0; --line:#26322F;
+  --accent:#2BB5A4; --accent-soft:#143330; --warn:#F2A35A; --warn-soft:#3A2716; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#0E1615; --card:#17211F; --fg:#E8F0EE; --muted:#93A4A0; --line:#26322F;
+  --accent:#2BB5A4; --accent-soft:#143330; --warn:#F2A35A; --warn-soft:#3A2716; color-scheme:dark}
+*{-webkit-tap-highlight-color:transparent}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--fg);font-family:var(--f-text);font-size:15px;line-height:1.5;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:calc(env(safe-area-inset-top,0px) + 20px) calc(env(safe-area-inset-bottom,0px) + 40px)}
+.wrap{max-width:560px;margin:0 auto;display:flex;flex-direction:column;gap:22px}
+header{display:flex;align-items:flex-end;justify-content:space-between;gap:12px}
+h1{margin:0;font-size:26px;font-weight:700;letter-spacing:.02em}
+.date{color:var(--muted);font-size:13px;font-family:var(--f-num);font-weight:600}
+.edit-btn{border:1px solid var(--line);background:var(--card);color:var(--fg);font:inherit;font-size:13px;
+  padding:6px 12px;border-radius:999px;cursor:pointer}
+.edit-btn[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:#fff}
+section{display:flex;flex-direction:column;gap:10px}
+h2{margin:0;font-size:12px;font-weight:700;color:var(--muted);letter-spacing:.12em}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+@media (max-width:340px){.grid{grid-template-columns:1fr}}
+.tile{position:relative;display:flex;flex-direction:column;gap:10px;padding:14px;border-radius:18px;
+  background:var(--card);border:1px solid var(--line);color:inherit;text-decoration:none;min-width:0;
+  transition:transform .12s ease, border-color .12s ease}
+a.tile:hover{border-color:var(--accent)} a.tile:active{transform:scale(.97)}
+a.tile:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+.tile.wide{grid-column:1/-1;flex-direction:row;align-items:center}
+.ic{width:46px;height:46px;border-radius:13px;display:grid;place-items:center;color:#fff;flex:none}
+.ic svg{width:24px;height:24px}
+.name{font-weight:700;font-size:16px}
+.desc{color:var(--muted);font-size:12.5px;line-height:1.45}
+.meta{display:flex;flex-direction:column;gap:2px;min-width:0}
+.host{font-family:var(--f-num);font-size:11px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.need{font-size:12px;color:var(--warn);background:var(--warn-soft);padding:2px 8px;border-radius:999px;align-self:flex-start}
+.editor{display:none;flex-direction:column;gap:6px}
+body.editing .editor{display:flex}
+body.editing a.tile{pointer-events:none}
+body.editing .tile .editor{pointer-events:auto}
+.editor input{font:inherit;font-size:13px;padding:7px 9px;border-radius:9px;border:1px solid var(--line);background:var(--bg);color:var(--fg);min-width:0;width:100%;box-sizing:border-box}
+.editor .row{display:flex;gap:6px}
+.editor button{font:inherit;font-size:12px;border:0;border-radius:9px;padding:6px 10px;cursor:pointer;background:var(--accent-soft);color:var(--accent);font-weight:700}
+.tip{font-size:12.5px;color:var(--muted);background:var(--card);border:1px dashed var(--line);border-radius:14px;padding:12px 14px}
+@media (prefers-reduced-motion:reduce){.tile{transition:none}}
+</style>
+
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <div class="date" id="today"></div>
+      <h1>我的 App</h1>
+    </div>
+    <button class="edit-btn" id="editBtn" aria-pressed="false">編輯網址</button>
+  </header>
+  <div id="groups"></div>
+  <div class="tip" id="tip">「編輯網址」改的網址只存在這支手機；想讓每台裝置都一樣，把網址傳給 Claude 寫進程式裡。</div>
+</div>
+
+<script>
+const ICONS={
+  book:'<path d="M5 4h11a3 3 0 0 1 3 3v13H8a3 3 0 0 1-3-3V4z"/><path d="M5 17a3 3 0 0 1 3-3h11"/><path d="M9 8h6"/>',
+  chart:'<path d="M4 19h16"/><path d="M7 15l4-5 3 3 5-7"/><path d="M16 6h3v3"/>',
+  cal:'<rect x="4" y="5" width="16" height="15" rx="2"/><path d="M4 10h16M9 3v4M15 3v4"/><path d="M8 14h3M8 17h6"/>',
+  people:'<circle cx="9" cy="9" r="3.2"/><path d="M3.5 19a5.5 5.5 0 0 1 11 0"/><circle cx="17" cy="10" r="2.5"/><path d="M15.5 14.6A4.5 4.5 0 0 1 21 19"/>',
+  face:'<path d="M12 3c4 0 7 3.2 7 8 0 5.5-3.4 10-7 10s-7-4.5-7-10c0-4.8 3-8 7-8z"/><circle cx="9.5" cy="11" r=".6" fill="currentColor"/><circle cx="14.5" cy="11" r=".6" fill="currentColor"/><path d="M10 16c1.2.8 2.8.8 4 0"/><path d="M16.5 6.5l1.8-1.8"/>',
+  sheet:'<rect x="4" y="3" width="16" height="18" rx="2"/><path d="M4 9h16M4 15h16M10 3v18"/>'
+};
+const GROUPS=[
+  {title:'錢',apps:[
+    {id:'ledger',name:'日記帳本',desc:'收支、淨資產、股票期貨',icon:'book',color:'--t-money',url:'https://claude.ai/artifact/QLgekAkVEzZLRoMZ4GFEvG'},
+    {id:'positions',name:'我的部位',desc:'台股現股與期貨即時損益',icon:'chart',color:'--t-pos',url:''},
+  ]},
+  {title:'診所',apps:[
+    {id:'shift',name:'班表',desc:'共同班表、預約、地點',icon:'cal',color:'--t-shift',url:'https://shift-manager-bbf7f.web.app/'},
+    {id:'clients',name:'客人管理',desc:'客人、回診、儲值、照片',icon:'people',color:'--t-client',url:'https://shift-manager-bbf7f.web.app/clients.html'},
+    {id:'caselog',name:'Case Log',desc:'醫美病例學習、注射點位圖',icon:'face',color:'--t-case',url:'../',wide:true},
+  ]},
+  {title:'試算表',apps:[
+    {id:'sheet-pos',name:'我的部位 試算表',desc:'交易紀錄、報價',icon:'sheet',color:'--t-sheet',url:'https://docs.google.com/spreadsheets/d/1y4_HbF1t21QIRtJWTiyBba0ShcjYtWQHydiTsLv2Zfc/edit'},
+    {id:'sheet-fx',name:'日記帳本 匯率',desc:'匯率、股價公式',icon:'sheet',color:'--t-sheet',url:'https://docs.google.com/spreadsheets/d/1jmUV3Iv3xXHpUhb21glSg-0U-w5IxlKF2MsFhFzVFn0/edit'},
+  ]},
+];
+const KEY='apps.urls.v1';
+let saved={};
+try{saved=JSON.parse(localStorage.getItem(KEY)||'{}')||{}}catch(e){saved={}}
+const store=()=>{try{localStorage.setItem(KEY,JSON.stringify(saved))}catch(e){}};
+const urlOf=a=>(saved[a.id]||a.url||'').trim();
+const hostOf=u=>{try{const h=new URL(u,location.href).hostname;return h.replace(/^www\./,'')}catch(e){return ''}};
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+function render(){
+  const root=document.getElementById('groups');
+  root.innerHTML=GROUPS.map(g=>`<section><h2>${esc(g.title)}</h2><div class="grid">${g.apps.map(tile).join('')}</div></section>`).join('');
+  root.style.display='flex';root.style.flexDirection='column';root.style.gap='22px';
+  root.querySelectorAll('[data-save]').forEach(b=>b.onclick=()=>{
+    const id=b.dataset.save,inp=document.getElementById('u-'+id),v=inp.value.trim();
+    if(v && !/^https:\/\//.test(v)){inp.setCustomValidity('網址要以 https:// 開頭');inp.reportValidity();return}
+    if(v)saved[id]=v;else delete saved[id];store();render();
+  });
+}
+function tile(a){
+  const u=urlOf(a),tag=u?'a':'div',same=u&&!/^https?:/.test(u);
+  const attrs=u?` href="${esc(u)}"${same?'':' target="_blank" rel="noopener"'}`:'';
+  return `<${tag} class="tile${a.wide?' wide':''}"${attrs}>
+    <span class="ic" style="background:var(${a.color})"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${ICONS[a.icon]}</svg></span>
+    <span class="meta"><span class="name">${esc(a.name)}</span><span class="desc">${esc(a.desc)}</span>
+      ${u?`<span class="host">${esc(hostOf(u))}</span>`:`<span class="need">還沒設定網址</span>`}</span>
+    <span class="editor"><input id="u-${a.id}" type="url" inputmode="url" placeholder="https://…" value="${esc(saved[a.id]||a.url||'')}">
+      <span class="row"><button type="button" data-save="${a.id}">儲存</button></span></span>
+  </${tag}>`;
+}
+document.getElementById('editBtn').onclick=e=>{
+  const on=!document.body.classList.contains('editing');
+  document.body.classList.toggle('editing',on);e.currentTarget.setAttribute('aria-pressed',on);
+  e.currentTarget.textContent=on?'完成':'編輯網址';
+};
+const d=new Date(),wd='日一二三四五六'[d.getDay()];
+document.getElementById('today').textContent=`${d.getMonth()+1}月${d.getDate()}日 星期${wd}`;
+document.getElementById('groups').addEventListener('click',e=>{if(document.body.classList.contains('editing')&&e.target.closest('a.tile'))e.preventDefault()});
+render();
+if('serviceWorker' in navigator)navigator.serviceWorker.register('sw.js').catch(()=>{});
+</script>
+</body>
+</html>

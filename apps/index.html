@@ -20,7 +20,7 @@
 :root{
   --bg:#F3F7F6; --card:#FFFFFF; --fg:#13201E; --muted:#5E6E6B; --line:#DCE6E4;
   --accent:#0E9384; --accent-soft:#E2F3F1; --warn:#B54708; --warn-soft:#FEF0E1;
-  --t-money:#0E9384; --t-pos:#2E6BD6; --t-shift:#7A4FD0; --t-client:#D2557A; --t-case:#C98A0E;
+  --t-money:#0E9384; --t-pos:#2E6BD6; --t-shift:#7A4FD0; --t-client:#D2557A; --t-case:#C98A0E; --t-med:#E0662E;
   --f-text:"Noto Sans TC","PingFang TC","Microsoft JhengHei",system-ui,sans-serif;
   --f-num:"Manrope","Noto Sans TC",system-ui,sans-serif;
 }
@@ -89,6 +89,7 @@ const ICONS={
   chart:'<path d="M4 19h16"/><path d="M7 15l4-5 3 3 5-7"/><path d="M16 6h3v3"/>',
   cal:'<rect x="4" y="5" width="16" height="15" rx="2"/><path d="M4 10h16M9 3v4M15 3v4"/><path d="M8 14h3M8 17h6"/>',
   people:'<circle cx="9" cy="9" r="3.2"/><path d="M3.5 19a5.5 5.5 0 0 1 11 0"/><circle cx="17" cy="10" r="2.5"/><path d="M15.5 14.6A4.5 4.5 0 0 1 21 19"/>',
+  pill:'<rect x="3.5" y="8.5" width="17" height="7" rx="3.5" transform="rotate(-40 12 12)"/><path d="M9.7 9.3l5 4.2"/>',
   face:'<path d="M12 3c4 0 7 3.2 7 8 0 5.5-3.4 10-7 10s-7-4.5-7-10c0-4.8 3-8 7-8z"/><circle cx="9.5" cy="11" r=".6" fill="currentColor"/><circle cx="14.5" cy="11" r=".6" fill="currentColor"/><path d="M10 16c1.2.8 2.8.8 4 0"/><path d="M16.5 6.5l1.8-1.8"/>',
 };
 const GROUPS=[
@@ -99,7 +100,8 @@ const GROUPS=[
   {title:'診所',apps:[
     {id:'shift',name:'班表',desc:'共同班表、預約、地點',icon:'cal',color:'--t-shift',url:'https://shift-manager-bbf7f.web.app/'},
     {id:'clients',name:'客人管理',desc:'客人、回診、儲值、照片',icon:'people',color:'--t-client',url:'https://shift-manager-bbf7f.web.app/clients.html'},
-    {id:'caselog',name:'Case Log',desc:'醫美病例學習、注射點位圖',icon:'face',color:'--t-case',url:'../',wide:true},
+    {id:'caselog',name:'Case Log',desc:'醫美病例學習、注射點位圖',icon:'face',color:'--t-case',url:'../',wide:false},
+    {id:'meds',name:'藥品庫存',desc:'藥品、耗材進出與存量',icon:'pill',color:'--t-med',url:'https://claude.ai/artifact/6TnYaCchzBXrHrCYPUxqK1'},
   ]},
 ];
 const KEY='apps.urls.v1';
